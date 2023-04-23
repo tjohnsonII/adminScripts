@@ -1,89 +1,90 @@
 #!/usr/bin/env python3
 
-import os
 import socket
-import subprocess
-import sys
+import os
+import signal
 
 
-def print_color(color, *args):
+def print_color(color, message):
+    """Print a message in a specific color."""
     colors = {
-        'black': '0;30',
-        'red': '0;31',
-        'green': '0;32',
-        'yellow': '0;33',
-        'blue': '0;34',
-        'purple': '0;35',
-        'cyan': '0;36',
-        'white': '0;37',
+        'black': '\u001b[30m',
+        'red': '\u001b[31m',
+        'green': '\u001b[32m',
+        'yellow': '\u001b[33m',
+        'blue': '\u001b[34m',
+        'magenta': '\u001b[35m',
+        'cyan': '\u001b[36m',
+        'white': '\u001b[37m',
+        'reset': '\u001b[0m'
     }
-    color_code = colors.get(color.lower())
-    if color_code is None:
-        raise ValueError(f'invalid color: {color}')
-    print(f'\033[{color_code}m', *args, '\033[0m')
+    print(f"{colors[color]}{message}{colors['reset']}")
 
 
 def check_network_connectivity():
+    """Check if the machine is connected to the internet."""
     try:
-        subprocess.check_call(['ping', '-q', '-c', '1', '-W', '1', 'google.com'], stdout=subprocess.DEVNULL)
-        return 'Connected to the internet'
-    except subprocess.CalledProcessError:
-        return 'No internet connection'
+        socket.create_connection(("www.google.com", 80))
+        print_color("green", "Connected to the internet")
+    except OSError:
+        print_color("red", "No internet connection")
 
 
 def save_users():
-    with open('user_list.txt', 'w') as f:
-        users = subprocess.check_output(['dscl', '.', '-list', '/Users', 'UniqueID'])
-        for line in users.decode().splitlines():
-            username, uid = line.split()
-            if int(uid) >= 1000:
-                print(username, file=f)
+    """Save a list of all users on the system."""
+    with open("user_list.txt", "w") as f:
+        os.system("dscl . -list /Users UniqueID | awk '$2 >= 1000 {print $1}' > user_list.txt")
 
 
 def save_groups():
-    with open('group_list.txt', 'w') as f:
-        groups = subprocess.check_output(['dscl', '.', '-list', '/Groups'])
-        for groupname in groups.decode().splitlines():
-            print(groupname, end='\t', file=f)
-            primary_gid = subprocess.check_output(['dscl', '.', '-read', f'/Groups/{groupname}', 'PrimaryGroupID'])
-            print(primary_gid.decode().strip().split()[-1], file=f)
+    """Save a list of all groups on the system."""
+    with open("group_list.txt", "w") as f:
+        os.system("dscl . -list /Groups | while read groupname; do printf '%s\\t' \"$groupname\"; dscl . -read /Groups/\"$groupname\" PrimaryGroupID | awk '{print $2}'; done > group_list.txt")
+
+
+def handle_request(conn, addr):
+    """Handle a single HTTP request."""
+    request = conn.recv(1024).decode()
+    print(f"Received request from {addr[0]}:{addr[1]}:")
+    print(request)
+
+    filename = request.split()[1][1:]
+    if not filename:
+        filename = "/Users/Shared/adminScripts/index.html"
+
+    if os.path.exists(filename) and os.path.isfile(filename):
+        with open(filename, "rb") as f:
+            content = f.read()
+        response = b"HTTP/1.1 200 OK\r\n\r\n" + content
+    else:
+        response = b"HTTP/1.1 404 Not Found\r\n\r\nFile not found"
+
+    conn.sendall(response)
+    conn.close()
+
+
+def start_server():
+    """Start the HTTP server."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        # Kill any process already using port 8080
+        os.system("kill $(lsof -t -i:8080)")
+
+        s.bind(('192.168.1.59', 8080))
+        s.listen()
+        print_color("green", "Server started")
+
+        while True:
+            conn, addr = s.accept()
+            handle_request(conn, addr)
 
 
 def main():
-    print_color('green', 'Starting Script')
-    network_status = check_network_connectivity()
-    print_color('green', network_status)
-
-    while True:
-        # Wait for a request and store the headers in a variable
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(('localhost', 8080))
-            s.listen()
-            conn, addr = s.accept()
-            with conn:
-                print(f'Received request from {addr[0]}:{addr[1]}')
-                request = conn.recv(4096).decode()
-                print(request)
-
-                # Extract the requested filename from the first line of the headers
-                filename = request.split()[1]
-                if filename == '/':
-                    filename = '/Users/Shared/adminScripts/index.html'
-                    print(f'Serving file: {filename}')
-
-                # Check if the file exists and is readable
-                if os.path.isfile(filename) and os.access(filename, os.R_OK):
-                    # Send an HTTP 200 response and the file contents
-                    with open(filename, 'rb') as f:
-                        content = f.read()
-                    response = f'HTTP/1.1 200 OK\r\nContent-Length: {len(content)}\r\n\r\n{content}'
-                    conn.sendall(response.encode())
-                else:
-                    # Send an HTTP 404 response and an error message
-                    response = 'HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\nFile not found'
-                    conn.sendall(response.encode())
-
-    print_color('green', 'Server Down')
+    print_color("green", "Starting script")
+    check_network_connectivity()
+    save_users()
+    save_groups()
+    start_server()
+    print_color("red", "Server down")
 
 
 if __name__ == '__main__':
