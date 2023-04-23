@@ -34,16 +34,37 @@ function save_groups {
 }
 
 
-
 # START SECTION
 # TODO: Add start section commands here
+print_color 32 "Starting Script"
+network_status=$(check_network_connectivity)
+
 
 # MIDDLE SECTION
 # TODO: Add middle section commands here
-#!/bin/bash
+print_color 32 $network_status
 
-echo "Logged in users:"
-who
+while true; do
+    # Wait for a request and store the headers in a variable
+    request=$(nc -l -p 8080 -q 1)
+
+    # Extract the requested filename from the first line of the headers
+    filename=$(echo "$request" | head -n 1 | cut -d ' ' -f 2)
+
+    # If the filename is empty, assume it's the root and serve index.html
+    if [ -z "$filename" ]; then
+        filename="index.html"
+    fi
+
+    # Check if the file exists and is readable
+    if [ -r "$filename" ]; then
+        # Send an HTTP 200 response and the file contents
+        echo -e "HTTP/1.1 200 OK\n\n$(cat $filename)" | nc -w 1 -N -l -p 8080
+    else
+        # Send an HTTP 404 response and an error message
+        echo -e "HTTP/1.1 404 Not Found\n\nFile not found" | nc -w 1 -N -l -p 8080
+    fi
+done
 
 # END SECTION
 # TODO: Add end section commands here

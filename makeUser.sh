@@ -15,6 +15,16 @@ print_color () {
   shift
   printf "\e[${color}m%s\e[0m\n" "$@"
 }
+
+check_network_connectivity() {
+    if ping -q -c 1 -W 1 google.com >/dev/null; then
+        echo "Connected to the internet"
+    else
+        echo "No internet connection"
+    fi
+}
+
+
 function save_users {
   dscl . -list /Users UniqueID | awk '$2 >= 1000 {print $1}' > user_list.txt
 }
